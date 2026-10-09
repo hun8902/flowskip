@@ -1,0 +1,11 @@
+node_modules/
+.DS_Store
+.env
+.env.*
+!.env.example
+*.log
+coverage/
+.tmp/
+# Personal backups and credentials must stay local.
+*settings*.json
+hidden-titles*.json

@@ -1,0 +1,123 @@
+{
+  "manifest_version": 3,
+  "name": "FlowSkip — Safari 감상 도우미",
+  "version": "0.4.1",
+  "description": "여섯 스트리밍 서비스의 감상 기능을 Apple 스타일 UI로 조절합니다.",
+  "permissions": [
+    "storage",
+    "activeTab"
+  ],
+  "optional_permissions": [
+    "tabs"
+  ],
+  "host_permissions": [
+    "https://*.netflix.com/*",
+    "https://*.netflix.ca/*",
+    "https://*.netflix.com.au/*",
+    "https://*.primevideo.com/*",
+    "https://*.amazon.com/*",
+    "https://*.amazon.co.jp/*",
+    "https://*.amazon.de/*",
+    "https://*.amazon.co.uk/*",
+    "https://*.disneyplus.com/*",
+    "https://*.hotstar.com/*",
+    "https://*.starplus.com/*",
+    "https://*.jiostar.com/*",
+    "https://*.jiocinema.com/*",
+    "https://*.crunchyroll.com/*",
+    "https://*.max.com/*",
+    "https://*.hbomax.com/*",
+    "https://*.paramountplus.com/*"
+  ],
+  "optional_host_permissions": [
+    "https://api.themoviedb.org/*",
+    "https://api.myanimelist.net/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html"
+  },
+  "options_page": "options.html",
+  "icons": {
+    "16": "icons/icon-16.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png",
+    "256": "icons/icon-256.png"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://*.netflix.com/*",
+        "https://*.netflix.ca/*",
+        "https://*.netflix.com.au/*"
+      ],
+      "js": [
+        "engine/netflix.js",
+        "extras.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://*.primevideo.com/*",
+        "https://*.amazon.com/*",
+        "https://*.amazon.co.jp/*",
+        "https://*.amazon.de/*",
+        "https://*.amazon.co.uk/*"
+      ],
+      "js": [
+        "engine/amazon.js",
+        "extras.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://*.disneyplus.com/*",
+        "https://*.hotstar.com/*",
+        "https://*.starplus.com/*",
+        "https://*.jiostar.com/*",
+        "https://*.jiocinema.com/*"
+      ],
+      "js": [
+        "engine/disney.js",
+        "extras.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://*.crunchyroll.com/*"
+      ],
+      "js": [
+        "engine/crunchyroll.js",
+        "extras.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://*.max.com/*",
+        "https://*.hbomax.com/*"
+      ],
+      "js": [
+        "engine/max.js",
+        "extras.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://*.paramountplus.com/*"
+      ],
+      "js": [
+        "engine/paramount.js",
+        "extras.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "short_name": "FlowSkip"
+}
