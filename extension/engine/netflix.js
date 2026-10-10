@@ -1786,7 +1786,7 @@
     return doWatch(source, cb, options);
   }
   function doWatch(source, cb, options = EMPTY_OBJ) {
-    const { immediate, deep, flush, once } = options;
+    const { immediate, deep, flush: flush2, once } = options;
     if (false) {
       if (immediate !== void 0) {
         warn$1(
@@ -1806,10 +1806,10 @@
     }
     const baseWatchOptions = extend({}, options);
     if (false) baseWatchOptions.onWarn = warn$1;
-    const runsImmediately = cb && immediate || !cb && flush !== "post";
+    const runsImmediately = cb && immediate || !cb && flush2 !== "post";
     let ssrCleanup;
     if (isInSSRComponentSetup) {
-      if (flush === "sync") {
+      if (flush2 === "sync") {
         const ctx = useSSRContext();
         ssrCleanup = ctx.__watcherHandles || (ctx.__watcherHandles = []);
       } else if (!runsImmediately) {
@@ -1824,11 +1824,11 @@
     const instance = currentInstance;
     baseWatchOptions.call = (fn, type, args) => callWithAsyncErrorHandling(fn, instance, type, args);
     let isPre = false;
-    if (flush === "post") {
+    if (flush2 === "post") {
       baseWatchOptions.scheduler = (job) => {
         queuePostRenderEffect(job, instance && instance.suspense);
       };
-    } else if (flush !== "sync") {
+    } else if (flush2 !== "sync") {
       isPre = true;
       baseWatchOptions.scheduler = (job, isFirstRun) => {
         if (isFirstRun) {
@@ -2154,10 +2154,67 @@
   // source/inject.ts
   var browser = globalThis.browser || globalThis.chrome;
 
-  // source/bridge.ts
+  // source/diagnostics.ts
   var api2 = globalThis.browser || globalThis.chrome;
+  var session = crypto.randomUUID();
+  var started = performance.now();
+  var pending = [];
+  var sending = false;
+  var ids = /* @__PURE__ */ new WeakMap();
+  var nextId = 1;
+  function diagnose(event, details = {}) {
+    const video = document.querySelector("video");
+    const finite = (value) => Number.isFinite(value) ? Math.round(value * 1e3) / 1e3 : -1;
+    if (video && !ids.has(video)) ids.set(video, nextId++);
+    pending.push({
+      session,
+      event,
+      ms: Math.round(performance.now() - started),
+      videoId: video ? ids.get(video) : 0,
+      time: video ? finite(video.currentTime) : -1,
+      rate: video ? finite(video.playbackRate) : -1,
+      muted: video?.muted ?? false,
+      paused: video?.paused ?? true,
+      seeking: video?.seeking ?? false,
+      ready: video?.readyState ?? 0,
+      ...details
+    });
+    pending = pending.slice(-200);
+  }
+  async function flush() {
+    if (sending || !pending.length) return;
+    sending = true;
+    const batch2 = pending.splice(0, 100);
+    try {
+      const result = await api2.runtime.sendMessage({ type: "diagnosticAppend", rows: batch2 });
+      if (!result?.ok) pending = [...batch2, ...pending].slice(-200);
+    } catch {
+      pending = [...batch2, ...pending].slice(-200);
+    } finally {
+      sending = false;
+    }
+  }
+  diagnose("start");
+  for (const name of ["ratechange", "volumechange", "seeking", "seeked", "pause", "playing", "ended", "emptied", "loadedmetadata"]) {
+    document.addEventListener(name, (event) => {
+      if (!(event.target instanceof HTMLVideoElement)) return;
+      diagnose(name, { targetIsSelected: event.target === document.querySelector("video") });
+      void flush();
+    }, true);
+  }
+  setInterval(() => {
+    diagnose("sample");
+    void flush();
+  }, 1e3);
+  addEventListener("pagehide", () => {
+    diagnose("pagehide");
+    void flush();
+  });
+
+  // source/bridge.ts
+  var api3 = globalThis.browser || globalThis.chrome;
   async function sendMessage(type, data, destination) {
-    const result = await api2.runtime.sendMessage({ type: "engine", action: type, data });
+    const result = await api3.runtime.sendMessage({ type: "engine", action: type, data });
     if (!result?.ok) return { error: result?.error || "Scene \uC5F0\uACB0 \uC2E4\uD328" };
     return result.value;
   }
@@ -2971,6 +3028,7 @@
     const button = document.querySelector(selector);
     if (button) {
       console.log(name, button);
+      diagnose("skip-button");
       interruptNetflixAd();
       button.click();
       if (incBadge) settings2.value.Statistics.SegmentsSkipped++;
@@ -2993,12 +3051,14 @@
     let blocked = false;
     let stopped = false;
     let queued = false;
+    let lastDiagnostic = 0;
     let endTimer;
     let lastPauseAdButton = null;
     const restore = () => {
       clearTimeout(endTimer);
       const previous = state;
       if (!previous) return;
+      diagnose("restore-start", { restoreRate: previous.rate });
       let restored = true;
       try {
         previous.video.playbackRate = previous.rate;
@@ -3010,9 +3070,11 @@
       } catch {
         restored = false;
       }
+      diagnose("restore-result", { restored, restoreRate: previous.rate });
       if (restored) state = null;
     };
     const interrupt = () => {
+      if (!blocked || state) diagnose("interrupt");
       blocked = true;
       restore();
     };
@@ -3033,6 +3095,10 @@
       const video = document.querySelector("video");
       const label = document.querySelector('span[class*="mmvz9h"]');
       const remaining = visible(label) ? parseAdTime(label?.textContent) : 0;
+      if (performance.now() - lastDiagnostic >= 500) {
+        lastDiagnostic = performance.now();
+        diagnose("ad-decision", { remaining, labelVisible: visible(label), active: !!state, blocked, enabled: !!settings2.value.Netflix?.skipAd, end: state?.end ?? -1, timelineBusy: sceneTimelineBusy(video) });
+      }
       if (video?.paused && settings2.value.Netflix?.skipAd) {
         const title2 = document.querySelector('div[data-uia="pause-ad-title-display"]');
         const button = document.querySelector('button[data-uia="pause-ad-expand-button"]');
@@ -3065,6 +3131,7 @@
       }
       const candidateEnd = video.currentTime + remaining - 2;
       if (!state) {
+        diagnose("ad-start", { remaining });
         state = { video, rate: video.playbackRate, opacity: video.style.opacity, end: candidateEnd };
         settings2.value.Statistics.SegmentsSkipped++;
         sendMessage("increaseBadge", {}, "background");
@@ -3076,7 +3143,9 @@
       }
       if (settings2.value.Video.epilepsy) video.style.opacity = "0";
       else video.style.opacity = state.opacity;
+      const beforeRate = video.playbackRate;
       const rate = accelerate(video);
+      if (beforeRate !== rate) diagnose("accelerate", { beforeRate, requestedRate: rate, budget });
       clearTimeout(endTimer);
       endTimer = setTimeout(interrupt, Math.max(0, budget / Math.max(rate, 1) * 1e3));
     };
@@ -3089,7 +3158,10 @@
       });
     };
     const onTransition = (event) => {
-      if (event.target === state?.video) interrupt();
+      if (event.target === state?.video) {
+        diagnose("transition-" + event.type);
+        interrupt();
+      }
     };
     const onProgress = (event) => {
       if (event.target === state?.video) update();

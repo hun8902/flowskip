@@ -1,9 +1,9 @@
 <p align="center"><img src="extension/icons/icon-128.png" width="72" alt="FlowSkip 아이콘"></p>
 <h1 align="center">FlowSkip</h1>
 <p align="center">감상은 자연스럽게. 반복되는 조작은 가볍게.</p>
-<p align="center">Safari용 스트리밍 감상 도우미 · 0.4.2 베타 · GPL-3.0</p>
+<p align="center">Safari용 스트리밍 감상 도우미 · 0.4.3 베타 · GPL-3.0</p>
 
-[다운로드](downloads/FlowSkip-Safari-0.4.2.zip) · [설치 안내](#설치하기) · [자세한 매뉴얼](docs/MANUAL.md) · [개인정보 안내](PRIVACY.md) · [변경 이력](CHANGELOG.md)
+[다운로드](downloads/FlowSkip-Safari-0.4.3.zip) · [설치 안내](#설치하기) · [자세한 매뉴얼](docs/MANUAL.md) · [개인정보 안내](PRIVACY.md) · [변경 이력](CHANGELOG.md)
 
 FlowSkip은 Netflix, Prime Video, Disney+, Crunchyroll, HBO/Max, Paramount+의 반복되는 재생 조작과 작품 탐색을 돕는 Safari Web Extension입니다. 서비스별 기능은 [Streaming enhanced](https://github.com/Dreamlinerm/Netflix-Prime-Auto-Skip)의 GPL 소스를 바탕으로 하며, 설정 UI와 Safari 저장·통신은 새로 구성했습니다.
 
@@ -35,7 +35,7 @@ FlowSkip은 Netflix, Prime Video, Disney+, Crunchyroll, HBO/Max, Paramount+의 �
 
 ### 1. 확장 ZIP 다운로드
 
-[FlowSkip-Safari-0.4.2.zip 다운로드](downloads/FlowSkip-Safari-0.4.2.zip). GitHub 화면에서는 파일을 연 뒤 **Download raw file**을 사용하세요. Releases에서 제공하는 경우 같은 이름의 첨부 파일을 받으면 됩니다. **Code → Download ZIP은 소스이므로 설치 파일과 다릅니다.**
+[FlowSkip-Safari-0.4.3.zip 다운로드](downloads/FlowSkip-Safari-0.4.3.zip). GitHub 화면에서는 파일을 연 뒤 **Download raw file**을 사용하세요. Releases에서 제공하는 경우 같은 이름의 첨부 파일을 받으면 됩니다. **Code → Download ZIP은 소스이므로 설치 파일과 다릅니다.**
 
 ### 2. Safari 개발자 메뉴 표시
 
@@ -45,7 +45,7 @@ Safari → **설정**(⌘,) → **고급** → 아래쪽 **웹 개발자를 위�
 
 ### 3. 임시 확장 추가
 
-설정 → **개발자** → **임시 확장 프로그램 추가…** → 받은 `FlowSkip-Safari-0.4.2.zip` 선택.
+설정 → **개발자** → **임시 확장 프로그램 추가…** → 받은 `FlowSkip-Safari-0.4.3.zip` 선택.
 
 ![Safari 개발자 설정의 임시 확장 프로그램 추가 버튼](docs/images/safari-developer.png)
 
@@ -97,7 +97,7 @@ npm run build
 npm run package
 ```
 
-`downloads/FlowSkip-Safari-0.4.2.zip`이 생성됩니다. 빌드/패키징은 테스트를 자동 실행하지 않습니다. 개발용 모형 테스트는 필요할 때 `npm test`로 실행할 수 있지만 실제 스트리밍 재생 검증을 대신하지 않습니다.
+`downloads/FlowSkip-Safari-0.4.3.zip`이 생성됩니다. 빌드/패키징은 테스트를 자동 실행하지 않습니다. 개발용 모형 테스트는 필요할 때 `npm test`로 실행할 수 있지만 실제 스트리밍 재생 검증을 대신하지 않습니다.
 
 `index.html`을 열면 홈페이지와 설치 안내를 볼 수 있습니다. `extension/options.html?preview=1`은 로컬 서버에서 UI 미리보기용입니다. 미리보기는 Safari 설정을 저장하지 않습니다.
 

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "FlowSkip — Safari 감상 도우미",
-  "version": "0.4.2",
+  "version": "0.4.3",
   "description": "여섯 스트리밍 서비스의 감상 기능을 Apple 스타일 UI로 조절합니다.",
   "permissions": [
     "storage",

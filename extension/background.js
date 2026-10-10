@@ -6,6 +6,19 @@ const trusted=s=>s.url?.startsWith(api.runtime.getURL(''));
 const allowed=s=>{try{return trusted(s)||serviceHost(new URL(s.url||s.tab?.url).hostname);}catch{return false;}};
 async function state(){const d=await api.storage.local.get(['settings','hiddenTitles','sceneEnabled','appearance','tmdbToken','malClientId']);return {settings:M.normalize(d.settings),hiddenTitles:M.cleanHidden(d.hiddenTitles),sceneEnabled:d.sceneEnabled!==false,appearance:d.appearance||'system',tmdbConnected:!!d.tmdbToken,malConnected:!!d.malClientId};}
 async function handle(m,s){if(!allowed(s))throw Error('허용되지 않은 요청');if(m.type==='state')return state();
+ if(m.type==='diagnosticAppend'){
+  if(!s.tab || !Array.isArray(m.rows) || m.rows.length>100)throw Error('잘못된 진단 요청');
+  const fields=['ms','videoId','time','rate','muted','paused','seeking','ready','targetIsSelected','restoreRate','restored','remaining','labelVisible','active','blocked','enabled','end','timelineBusy','beforeRate','requestedRate','budget'];
+  const events=new Set(['start','sample','pagehide','ratechange','volumechange','seeking','seeked','pause','playing','ended','emptied','loadedmetadata','restore-start','restore-result','interrupt','ad-decision','ad-start','accelerate','skip-button','transition-seeking','transition-ended','transition-emptied','transition-loadstart','transition-pause']);
+  const rows=m.rows.filter(x=>x&&events.has(x.event)&&typeof x.session==='string'&&/^[a-f0-9-]{36}$/.test(x.session)).map(x=>{
+   const clean={session:x.session,event:x.event,received:Date.now()};
+   for(const key of fields)if(typeof x[key]==='boolean'||(typeof x[key]==='number'&&Number.isFinite(x[key])))clean[key]=x[key];
+   return clean;
+  });
+  const d=await api.storage.local.get('netflixDiagnostics');
+  const old=Array.isArray(d.netflixDiagnostics)?d.netflixDiagnostics:[];
+  await api.storage.local.set({netflixDiagnostics:[...old,...rows].filter(x=>x.received>Date.now()-86400000).slice(-3000)});return true;
+ }
  if(m.type==='engine'){
   if(m.action==='fetch')return remote(m.data);
   if(['increaseBadge','resetBadge','setBadgeText'].includes(m.action)&&s.tab?.id){const id=s.tab.id;badges[id]=m.action==='resetBadge'?0:(badges[id]||0)+1;try{await api.action.setBadgeText({tabId:id,text:badges[id]?String(badges[id]):''});}catch{}return true;}return true;
@@ -17,6 +30,8 @@ async function handle(m,s){if(!allowed(s))throw Error('허용되지 않은 요�
   if(m.key==='settings')value=M.normalize(value);if(m.key==='hiddenTitles')value=M.cleanHidden(value);await api.storage.local.set({[m.key]:value});return true;
  }
  if(!trusted(s))throw Error('설정 화면에서만 변경할 수 있습니다.');
+ if(m.type==='diagnosticExport'){const d=await api.storage.local.get('netflixDiagnostics');return {format:1,version:api.runtime.getManifest().version,rows:(d.netflixDiagnostics||[]).filter(x=>x.received>Date.now()-86400000)};}
+ if(m.type==='diagnosticClear'){await api.storage.local.remove('netflixDiagnostics');return true;}
  if(m.type==='patch'){const d=await state();const item=SceneSchema.find(x=>x.group===m.group&&x.key===m.key);if(!item||item.unsupported)throw Error('지원하지 않는 설정');M.patch(d.settings,{path:[m.group,m.key],value:m.value});if(m.key==='skipCredits'&&m.value)d.settings[m.group].watchCredits=false;if(m.key==='watchCredits'&&m.value)d.settings[m.group].skipCredits=false;await api.storage.local.set({settings:M.normalize(d.settings)});return state();}
  if(m.type==='common'){const d=await state();for(const g of ['Netflix','Amazon','Disney','Crunchyroll','HBO','Paramount'])if(typeof d.settings[g][m.key]==='boolean'){d.settings[g][m.key]=!!m.value;if(m.key==='skipCredits'&&m.value&&'watchCredits'in d.settings[g])d.settings[g].watchCredits=false;}await api.storage.local.set({settings:d.settings});return state();}
  if(m.type==='enabled'){await api.storage.local.set({sceneEnabled:!!m.value});return state();}

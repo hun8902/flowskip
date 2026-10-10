@@ -1,3 +1,4 @@
+import { diagnose } from "../diagnostics"
 import { sendMessage } from "webext-bridge/content-script"
 import {
 	startSharedFunctions,
@@ -181,6 +182,7 @@ function Netflix_General(selector: string, name: string, incBadge = true) {
 	const button = document.querySelector(selector) as HTMLElement
 	if (button) {
 		console.log(name, button)
+		diagnose("skip-button")
 		interruptNetflixAd()
 		button.click()
 		if (incBadge) settings.value.Statistics.SegmentsSkipped++
@@ -209,19 +211,22 @@ function Netflix_SkipAdInterval() {
  let blocked = false;
  let stopped = false;
  let queued = false;
+ let lastDiagnostic = 0;
  let endTimer: ReturnType<typeof setTimeout> | undefined;
  let lastPauseAdButton: HTMLElement | null = null;
  const restore = () => {
   clearTimeout(endTimer);
   const previous = state;
   if (!previous) return;
+  diagnose("restore-start", {restoreRate: previous.rate});
   // Restore independently and retain failed work for the next update.
   let restored = true;
   try { previous.video.playbackRate = previous.rate; } catch { restored = false; }
   try { previous.video.style.opacity = previous.opacity; } catch { restored = false; }
+  diagnose("restore-result", {restored, restoreRate: previous.rate});
   if (restored) state = null;
  };
- const interrupt = () => { blocked = true; restore(); };
+ const interrupt = () => { if (!blocked || state) diagnose("interrupt"); blocked = true; restore(); };
  interruptNetflixAd = interrupt;
  const visible = (element: Element | null) => !!element?.checkVisibility({ opacityProperty: true, visibilityProperty: true });
  const accelerate = (video: HTMLVideoElement) => {
@@ -238,6 +243,10 @@ function Netflix_SkipAdInterval() {
   const video = document.querySelector('video');
   const label = document.querySelector('span[class*="mmvz9h"]');
   const remaining = visible(label) ? parseAdTime(label?.textContent) : 0;
+  if (performance.now() - lastDiagnostic >= 500) {
+   lastDiagnostic = performance.now();
+   diagnose("ad-decision", {remaining, labelVisible: visible(label), active: !!state, blocked, enabled: !!settings.value.Netflix?.skipAd, end: state?.end ?? -1, timelineBusy: sceneTimelineBusy(video)});
+  }
   // Pause-ad dismissal is independent of the playback countdown.
   if (video?.paused && settings.value.Netflix?.skipAd) {
    const title = document.querySelector('div[data-uia="pause-ad-title-display"]');
@@ -258,6 +267,7 @@ function Netflix_SkipAdInterval() {
   if (blocked || remaining <= 2) { interrupt(); return; }
   const candidateEnd = video.currentTime + remaining - 2;
   if (!state) {
+   diagnose("ad-start", {remaining});
    state = { video, rate: video.playbackRate, opacity: video.style.opacity, end: candidateEnd };
    settings.value.Statistics.SegmentsSkipped++;
    sendMessage('increaseBadge', {}, 'background');
@@ -268,7 +278,9 @@ function Netflix_SkipAdInterval() {
   // Explicit muting made the saved mute state ambiguous across ad transitions.
   if (settings.value.Video.epilepsy) video.style.opacity = '0';
   else video.style.opacity = state.opacity;
+  const beforeRate = video.playbackRate;
   const rate = accelerate(video);
+  if (beforeRate !== rate) diagnose("accelerate", {beforeRate, requestedRate: rate, budget});
   clearTimeout(endTimer);
   endTimer = setTimeout(interrupt, Math.max(0, budget / Math.max(rate, 1) * 1000));
  };
@@ -278,7 +290,7 @@ function Netflix_SkipAdInterval() {
   queueMicrotask(() => { queued = false; update(); });
  };
  const onTransition = (event: Event) => {
-  if (event.target === state?.video) interrupt();
+  if (event.target === state?.video) { diagnose("transition-" + event.type); interrupt(); }
  };
  const onProgress = (event: Event) => {
   if (event.target === state?.video) update();
