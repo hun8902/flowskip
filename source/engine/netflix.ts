@@ -53,7 +53,7 @@ async function startNetflix() {
 	await hiddenTitlesPromise
 	logStartOfAddon()
 	if (settings.value.Netflix?.profile) AutoPickProfile()
-	if (settings.value.Netflix?.skipAd) Netflix_SkipAdInterval()
+	Netflix_SkipAdInterval()
 	if (settings.value.Netflix?.speedSlider) Netflix_SpeedKeyboard()
 	NetflixObserver.observe(document, config)
 }
@@ -176,10 +176,12 @@ function AutoPickProfile() {
 		}
 	})
 }
+let interruptNetflixAd = () => {};
 function Netflix_General(selector: string, name: string, incBadge = true) {
 	const button = document.querySelector(selector) as HTMLElement
 	if (button) {
 		console.log(name, button)
+		interruptNetflixAd()
 		button.click()
 		if (incBadge) settings.value.Statistics.SegmentsSkipped++
 		sendMessage("increaseBadge", {}, "background")
@@ -201,112 +203,102 @@ function parseAdTime(adTimeText: string | null | undefined) {
 }
 
 function Netflix_SkipAdInterval() {
- let lastPauseAdButton: HTMLElement | null = null;
- let savedAdState: { video: HTMLVideoElement; muted: boolean; rate: number; opacity: string } | null = null;
- let trackedLabel: Element | null = null;
- let trackedText = '';
- let labelDeadline = 0;
- let expiredLabel: Element | null = null;
- let expiredText = '';
+ // Keep the observer alive while disabled so settings can be toggled without a reload.
+ type AdState = { video: HTMLVideoElement; rate: number; opacity: string; end: number };
+ let state: AdState | null = null;
+ let blocked = false;
  let stopped = false;
  let queued = false;
- const restoreAdState = () => {
-  const previous = savedAdState;
-  savedAdState = null;
+ let endTimer: ReturnType<typeof setTimeout> | undefined;
+ let lastPauseAdButton: HTMLElement | null = null;
+ const restore = () => {
+  clearTimeout(endTimer);
+  const previous = state;
   if (!previous) return;
-  previous.video.muted = previous.muted;
-  previous.video.playbackRate = previous.rate;
-  previous.video.style.opacity = previous.opacity;
-  lastAdTimeText = 0;
+  // Restore independently and retain failed work for the next update.
+  let restored = true;
+  try { previous.video.playbackRate = previous.rate; } catch { restored = false; }
+  try { previous.video.style.opacity = previous.opacity; } catch { restored = false; }
+  if (restored) state = null;
  };
+ const interrupt = () => { blocked = true; restore(); };
+ interruptNetflixAd = interrupt;
+ const visible = (element: Element | null) => !!element?.checkVisibility({ opacityProperty: true, visibilityProperty: true });
  const accelerate = (video: HTMLVideoElement) => {
-  // 16x is the requested ceiling; fall back when the media implementation rejects it.
   for (const rate of [16, 12, 8, 4]) {
    try {
     if (video.playbackRate !== rate) video.playbackRate = rate;
     if (Math.abs(video.playbackRate - rate) < 0.01) return rate;
-   } catch { /* Unsupported playback rate: try the next candidate. */ }
+   } catch { /* Try a supported rate. */ }
   }
   return video.playbackRate;
  };
  const update = () => {
   if (stopped) return;
-  if (!settings.value.Netflix?.skipAd) { stop(); return; }
   const video = document.querySelector('video');
-  if (savedAdState && savedAdState.video !== video) restoreAdState();
-  if (!video || sceneTimelineBusy(video)) { restoreAdState(); return; }
   const label = document.querySelector('span[class*="mmvz9h"]');
-  const text = label?.textContent?.trim() || '';
-  const visible = !!label?.checkVisibility({ opacityProperty: true, visibilityProperty: true });
-  const remaining = visible ? parseAdTime(text) : 0;
-  const now = performance.now();
-  if (label !== trackedLabel || text !== trackedText) {
-   trackedLabel = label;
-   trackedText = text;
-   labelDeadline = 0;
-   expiredLabel = null;
-   expiredText = '';
+  const remaining = visible(label) ? parseAdTime(label?.textContent) : 0;
+  // Pause-ad dismissal is independent of the playback countdown.
+  if (video?.paused && settings.value.Netflix?.skipAd) {
+   const title = document.querySelector('div[data-uia="pause-ad-title-display"]');
+   const button = document.querySelector('button[data-uia="pause-ad-expand-button"]') as HTMLElement | null;
+   if (!visible(title)) lastPauseAdButton = null;
+   else if (button && button !== lastPauseAdButton) { lastPauseAdButton = button; button.click(); }
+  } else lastPauseAdButton = null;
+  // Only a cleared ad indicator re-arms acceleration. A changing countdown or
+  // replacement label must never restart acceleration after the cutoff.
+  if (remaining <= 0) { restore(); blocked = false; return; }
+  if (state && state.video !== video) { interrupt(); return; }
+  if (!video || !settings.value.Netflix?.skipAd || sceneTimelineBusy(video) || video.ended) {
+   interrupt(); return;
   }
-  // A stale countdown can remain in Netflix's DOM across the transition to the programme.
-  if (savedAdState && !video.paused && labelDeadline && now >= labelDeadline) {
-   expiredLabel = label;
-   expiredText = text;
-   restoreAdState();
-  }
-  const expired = label === expiredLabel && text === expiredText;
-  if (remaining > 0 && !expired && !video.ended) {
-   if (!video.paused) {
-    if (!savedAdState) {
-     savedAdState = { video, muted: video.muted, rate: video.playbackRate, opacity: video.style.opacity };
-     settings.value.Statistics.NetflixAdTimeSkipped += remaining;
-     settings.value.Statistics.SegmentsSkipped++;
-     sendMessage('increaseBadge', {}, 'background');
-    }
-    if (!video.muted) video.muted = true;
-    if (settings.value.Video.epilepsy && video.style.opacity !== '0') video.style.opacity = '0';
-    const rate = accelerate(video);
-    if (!labelDeadline) labelDeadline = now + (remaining / Math.max(rate, 1)) * 1000 + 150;
-   } else {
-    labelDeadline = 0;
-   }
-  } else {
-   restoreAdState();
-   labelDeadline = 0;
-  }
-  const div = document.querySelector('div[data-uia="pause-ad-title-display"]');
-  const button = document.querySelector('button[data-uia="pause-ad-expand-button"]') as HTMLElement;
-  if (!div?.checkVisibility({ opacityProperty: true })) lastPauseAdButton = null;
-  else if (video.paused && button && button !== lastPauseAdButton) {
-   lastPauseAdButton = button;
-   button.click();
+  if (video.paused) { restore(); return; }
+  // Stop early: integer countdowns and delayed DOM updates cannot identify the
+  // exact programme boundary. Leave the final two media seconds at normal speed.
+  if (blocked || remaining <= 2) { interrupt(); return; }
+  const candidateEnd = video.currentTime + remaining - 2;
+  if (!state) {
+   state = { video, rate: video.playbackRate, opacity: video.style.opacity, end: candidateEnd };
    settings.value.Statistics.SegmentsSkipped++;
    sendMessage('increaseBadge', {}, 'background');
-  }
+  } else state.end = Math.min(state.end, candidateEnd);
+  const budget = state.end - video.currentTime;
+  if (budget <= 0 || !Number.isFinite(budget)) { interrupt(); return; }
+  // Do not alter video.muted: Netflix can propagate it to a replacement video.
+  // Explicit muting made the saved mute state ambiguous across ad transitions.
+  if (settings.value.Video.epilepsy) video.style.opacity = '0';
+  else video.style.opacity = state.opacity;
+  const rate = accelerate(video);
+  clearTimeout(endTimer);
+  endTimer = setTimeout(interrupt, Math.max(0, budget / Math.max(rate, 1) * 1000));
  };
  const schedule = () => {
   if (queued || stopped) return;
   queued = true;
   queueMicrotask(() => { queued = false; update(); });
  };
+ const onTransition = (event: Event) => {
+  if (event.target === state?.video) interrupt();
+ };
+ const onProgress = (event: Event) => {
+  if (event.target === state?.video) update();
+ };
  const observer = new MutationObserver(schedule);
  observer.observe(document, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['class', 'style', 'hidden'] });
  const interval = setInterval(update, 50);
- const onMediaEnd = (event: Event) => {
-  if (event.target !== savedAdState?.video) return;
-  expiredLabel = trackedLabel;
-  expiredText = trackedText;
-  restoreAdState();
- };
+ const transitions = ['seeking', 'ended', 'emptied', 'loadstart', 'pause'];
+ const progressEvents = ['timeupdate', 'ratechange', 'playing'];
+ for (const name of transitions) document.addEventListener(name, onTransition, true);
+ for (const name of progressEvents) document.addEventListener(name, onProgress, true);
  function stop() {
   stopped = true;
   clearInterval(interval);
   observer.disconnect();
-  document.removeEventListener('ended', onMediaEnd, true);
-  document.removeEventListener('emptied', onMediaEnd, true);
-  restoreAdState();
+  for (const name of transitions) document.removeEventListener(name, onTransition, true);
+  for (const name of progressEvents) document.removeEventListener(name, onProgress, true);
+  interruptNetflixAd = () => {};
+  restore();
  }
- document.addEventListener('ended', onMediaEnd, true);
- document.addEventListener('emptied', onMediaEnd, true);
  addEventListener('pagehide', stop, { once: true });
  update();
 }

@@ -7,7 +7,7 @@
     "jsdom": "^30.1.2"
   },
   "name": "flowskip",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "private": true,
   "license": "GPL-3.0-only",
   "scripts": {

@@ -2840,7 +2840,6 @@
   );
   var today2 = (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
   var ua2 = navigator.userAgent;
-  var lastAdTimeText = 0;
   var curVideoTitle = null;
   var videoSpeed = ref(1);
   var isEdge = /edg/i.test(ua2);
@@ -2861,7 +2860,7 @@
     await hiddenTitlesPromise2;
     logStartOfAddon();
     if (settings2.value.Netflix?.profile) AutoPickProfile();
-    if (settings2.value.Netflix?.skipAd) Netflix_SkipAdInterval();
+    Netflix_SkipAdInterval();
     if (settings2.value.Netflix?.speedSlider) Netflix_SpeedKeyboard();
     NetflixObserver.observe(document, config);
   }
@@ -2966,10 +2965,13 @@
       }
     });
   }
+  var interruptNetflixAd = () => {
+  };
   function Netflix_General(selector, name, incBadge = true) {
     const button = document.querySelector(selector);
     if (button) {
       console.log(name, button);
+      interruptNetflixAd();
       button.click();
       if (incBadge) settings2.value.Statistics.SegmentsSkipped++;
       sendMessage("increaseBadge", {}, "background");
@@ -2987,24 +2989,35 @@
     return adTime;
   }
   function Netflix_SkipAdInterval() {
-    let lastPauseAdButton = null;
-    let savedAdState = null;
-    let trackedLabel = null;
-    let trackedText = "";
-    let labelDeadline = 0;
-    let expiredLabel = null;
-    let expiredText = "";
+    let state = null;
+    let blocked = false;
     let stopped = false;
     let queued = false;
-    const restoreAdState = () => {
-      const previous = savedAdState;
-      savedAdState = null;
+    let endTimer;
+    let lastPauseAdButton = null;
+    const restore = () => {
+      clearTimeout(endTimer);
+      const previous = state;
       if (!previous) return;
-      previous.video.muted = previous.muted;
-      previous.video.playbackRate = previous.rate;
-      previous.video.style.opacity = previous.opacity;
-      lastAdTimeText = 0;
+      let restored = true;
+      try {
+        previous.video.playbackRate = previous.rate;
+      } catch {
+        restored = false;
+      }
+      try {
+        previous.video.style.opacity = previous.opacity;
+      } catch {
+        restored = false;
+      }
+      if (restored) state = null;
     };
+    const interrupt = () => {
+      blocked = true;
+      restore();
+    };
+    interruptNetflixAd = interrupt;
+    const visible = (element) => !!element?.checkVisibility({ opacityProperty: true, visibilityProperty: true });
     const accelerate = (video) => {
       for (const rate of [16, 12, 8, 4]) {
         try {
@@ -3017,62 +3030,55 @@
     };
     const update = () => {
       if (stopped) return;
-      if (!settings2.value.Netflix?.skipAd) {
-        stop2();
-        return;
-      }
       const video = document.querySelector("video");
-      if (savedAdState && savedAdState.video !== video) restoreAdState();
-      if (!video || sceneTimelineBusy(video)) {
-        restoreAdState();
+      const label = document.querySelector('span[class*="mmvz9h"]');
+      const remaining = visible(label) ? parseAdTime(label?.textContent) : 0;
+      if (video?.paused && settings2.value.Netflix?.skipAd) {
+        const title2 = document.querySelector('div[data-uia="pause-ad-title-display"]');
+        const button = document.querySelector('button[data-uia="pause-ad-expand-button"]');
+        if (!visible(title2)) lastPauseAdButton = null;
+        else if (button && button !== lastPauseAdButton) {
+          lastPauseAdButton = button;
+          button.click();
+        }
+      } else lastPauseAdButton = null;
+      if (remaining <= 0) {
+        restore();
+        blocked = false;
         return;
       }
-      const label = document.querySelector('span[class*="mmvz9h"]');
-      const text = label?.textContent?.trim() || "";
-      const visible = !!label?.checkVisibility({ opacityProperty: true, visibilityProperty: true });
-      const remaining = visible ? parseAdTime(text) : 0;
-      const now = performance.now();
-      if (label !== trackedLabel || text !== trackedText) {
-        trackedLabel = label;
-        trackedText = text;
-        labelDeadline = 0;
-        expiredLabel = null;
-        expiredText = "";
+      if (state && state.video !== video) {
+        interrupt();
+        return;
       }
-      if (savedAdState && !video.paused && labelDeadline && now >= labelDeadline) {
-        expiredLabel = label;
-        expiredText = text;
-        restoreAdState();
+      if (!video || !settings2.value.Netflix?.skipAd || sceneTimelineBusy(video) || video.ended) {
+        interrupt();
+        return;
       }
-      const expired = label === expiredLabel && text === expiredText;
-      if (remaining > 0 && !expired && !video.ended) {
-        if (!video.paused) {
-          if (!savedAdState) {
-            savedAdState = { video, muted: video.muted, rate: video.playbackRate, opacity: video.style.opacity };
-            settings2.value.Statistics.NetflixAdTimeSkipped += remaining;
-            settings2.value.Statistics.SegmentsSkipped++;
-            sendMessage("increaseBadge", {}, "background");
-          }
-          if (!video.muted) video.muted = true;
-          if (settings2.value.Video.epilepsy && video.style.opacity !== "0") video.style.opacity = "0";
-          const rate = accelerate(video);
-          if (!labelDeadline) labelDeadline = now + remaining / Math.max(rate, 1) * 1e3 + 150;
-        } else {
-          labelDeadline = 0;
-        }
-      } else {
-        restoreAdState();
-        labelDeadline = 0;
+      if (video.paused) {
+        restore();
+        return;
       }
-      const div = document.querySelector('div[data-uia="pause-ad-title-display"]');
-      const button = document.querySelector('button[data-uia="pause-ad-expand-button"]');
-      if (!div?.checkVisibility({ opacityProperty: true })) lastPauseAdButton = null;
-      else if (video.paused && button && button !== lastPauseAdButton) {
-        lastPauseAdButton = button;
-        button.click();
+      if (blocked || remaining <= 2) {
+        interrupt();
+        return;
+      }
+      const candidateEnd = video.currentTime + remaining - 2;
+      if (!state) {
+        state = { video, rate: video.playbackRate, opacity: video.style.opacity, end: candidateEnd };
         settings2.value.Statistics.SegmentsSkipped++;
         sendMessage("increaseBadge", {}, "background");
+      } else state.end = Math.min(state.end, candidateEnd);
+      const budget = state.end - video.currentTime;
+      if (budget <= 0 || !Number.isFinite(budget)) {
+        interrupt();
+        return;
       }
+      if (settings2.value.Video.epilepsy) video.style.opacity = "0";
+      else video.style.opacity = state.opacity;
+      const rate = accelerate(video);
+      clearTimeout(endTimer);
+      endTimer = setTimeout(interrupt, Math.max(0, budget / Math.max(rate, 1) * 1e3));
     };
     const schedule = () => {
       if (queued || stopped) return;
@@ -3082,25 +3088,29 @@
         update();
       });
     };
+    const onTransition = (event) => {
+      if (event.target === state?.video) interrupt();
+    };
+    const onProgress = (event) => {
+      if (event.target === state?.video) update();
+    };
     const observer = new MutationObserver(schedule);
     observer.observe(document, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ["class", "style", "hidden"] });
     const interval = setInterval(update, 50);
-    const onMediaEnd = (event) => {
-      if (event.target !== savedAdState?.video) return;
-      expiredLabel = trackedLabel;
-      expiredText = trackedText;
-      restoreAdState();
-    };
+    const transitions = ["seeking", "ended", "emptied", "loadstart", "pause"];
+    const progressEvents = ["timeupdate", "ratechange", "playing"];
+    for (const name of transitions) document.addEventListener(name, onTransition, true);
+    for (const name of progressEvents) document.addEventListener(name, onProgress, true);
     function stop2() {
       stopped = true;
       clearInterval(interval);
       observer.disconnect();
-      document.removeEventListener("ended", onMediaEnd, true);
-      document.removeEventListener("emptied", onMediaEnd, true);
-      restoreAdState();
+      for (const name of transitions) document.removeEventListener(name, onTransition, true);
+      for (const name of progressEvents) document.removeEventListener(name, onProgress, true);
+      interruptNetflixAd = () => {
+      };
+      restore();
     }
-    document.addEventListener("ended", onMediaEnd, true);
-    document.addEventListener("emptied", onMediaEnd, true);
     addEventListener("pagehide", stop2, { once: true });
     update();
   }
